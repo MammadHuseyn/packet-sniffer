@@ -1,6 +1,11 @@
+#in windows u cant really see the frame but Ip packets, so these guys are not needed
+#this code whole is wrong. because raw ports can see mac addreses. But still it gets ip packets ->raw data
+
 import socket
 import struct
 import textwrap
+
+
 
 def main():
     HOST = socket.gethostbyname(socket.gethostname())
@@ -17,6 +22,9 @@ def main():
         #print("Destination {}\nSource {}\nProtocol {}\n".format(dest_mac, src_mac, proto))
 
 
+
+
+
 # to unpack the ethernet frame
 def ethernet_frame(data):
     dest_mac, src_mac, proto = struct.unpack('! 6s 6s H', data[:14]) # ! is for the big, little endian
@@ -28,4 +36,4 @@ def get_mac_add(bytes_add):
     mac_add = ":".join(bytes_str).upper()
     return mac_add
 
-main()
+#main()
