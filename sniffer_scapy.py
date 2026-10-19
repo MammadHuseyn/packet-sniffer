@@ -1,7 +1,7 @@
 #u gotta install Npcap aswell, to link-layer capture
 
 from datetime import datetime
-from scapy.all import sniff, Ether, IP, TCP, UDP, ARP, IPv6
+from scapy.all import sniff, Ether, IP, TCP, UDP, ARP, IPv6, DNS, DNSQR, DNSRR, Raw
 from collections import Counter, defaultdict
 #sniff captures packets from a network interface
 #ether represents ethernet layer
@@ -11,9 +11,35 @@ packets_by_source = defaultdict(int)
 
 ether_type_counts = Counter()
 protocol_counts = Counter()
+dns_query_counts = Counter()
+
+
+def printable_preview(payload, limit=32):
+    return "".join(
+        chr(byte) if 32 <= byte < 127 else "."
+        for byte in payload[:limit]
+    )
+
 
 
 def handle_packet(packet):
+
+    """if DNS in packet and DNSQR in packet:
+        query = packet[DNSQR]
+        domain = query.qname.decode(errors="replace").rstrip(".")
+        print(f"DNS query: {domain}")"""
+
+    if DNS in packet:
+        dns = packet[DNS]
+        if dns.qr == 0 and DNSQR in packet:
+            query = packet[DNSQR]
+            domain = query.qname.decode(errors="replace").rstrip(".")
+            dns_query_counts[domain] += 1
+            print(f"DNS query: {domain} type {query.qtype}")
+        elif dns.qr == 1:
+            print(f"DNS response: answers={dns.ancount}")
+
+
     if Ether not in packet:
         return
 
@@ -125,12 +151,21 @@ def print_summary():
     for protocol, count in protocol_counts.most_common():
         print(f"{protocol:<14} {count:>10}")
 
+    print("\nDNS queries")
+    print("-----------")
+    print(f"{'Domain':<40} {'Queries':>10}")
+    print("-" * 52)
+
+    for domain, count in dns_query_counts.most_common():
+        print(f"{domain:<40} {count:>10}")
+
 
 try:
     print("Started. Press Ctrl+C.")
     sniff(timeout=10, prn=handle_packet, store=False) #store false, means that we dont keep all packets in memo
 
 finally:
+    print("ended")
     print_summary()
 
 #Npcap captures the packets at the data-link llayer, 
