@@ -99,7 +99,7 @@ For more detailed interface information:
 python -c "from scapy.all import show_interfaces; show_interfaces()"
 ```
 
-### Why not use a normal IP socket?
+## Why not use a normal IP socket?
 
 An `AF_INET` raw socket generally exposes IP packets. It does not reliably
 provide the original Ethernet header on Windows, so the source and
