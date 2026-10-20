@@ -1,7 +1,8 @@
 #u gotta install Npcap aswell, to link-layer capture
 
-from datetime import datetime
+from datetime import datetime, timezone
 from scapy.all import sniff, Ether, IP, TCP, UDP, ARP, IPv6, DNS, DNSQR, DNSRR, Raw
+import database
 #raw is for the payload, to see it raw, but generally not needed
 #sniff captures packets from a network interface
 #ether represents ethernet layer
@@ -10,6 +11,9 @@ from scapy.all import sniff, Ether, IP, TCP, UDP, ARP, IPv6, DNS, DNSQR, DNSRR, 
 
 from collections import Counter, defaultdict
 #to store stats, defaultdict auto starts missing values at 0
+import database
+
+
 
 
 bytes_by_source = defaultdict(int)
@@ -32,33 +36,29 @@ dns_query_counts = Counter() #dns_query counts
 
 #main processing function
 def handle_packet(packet):
-
-    #checking if packet has a DNS layer
-    if DNS in packet:
-        dns = packet[DNS]
-        if dns.qr == 0 and DNSQR in packet: #qr indicates msg type. 0-query, 1-response
-            query = packet[DNSQR]
-            domain = query.qname.decode(errors="replace").rstrip(".") #decoding bytes into text
-            dns_query_counts[domain] += 1
-            print(f"DNS query: {domain} type {query.qtype}")
-        elif dns.qr == 1:
-            print(f"DNS response: answers={dns.ancount}")
-
     #we need an ethernet layer to get MAC addresses and the EtherType
     if Ether not in packet:
         return
 
-    #get the name of the protocol inside the ethernet frame
-    protocol = ether_type_name(packet[Ether].type)
+    ethernet = packet[Ether]
+    ether_type = ethernet.type
+    packet_size = len(packet)
+    protocol = ether_type_name(ether_type)
+    source_port = None
+    destination_port = None
 
     #check the transport and network protocols in the packet
     if TCP in packet:
         transport = packet[TCP]
-        protocol = f"TCP:{transport.sport}->{transport.dport}"
+        protocol = "TCP"
+        source_port = transport.sport
+        destination_port = transport.dport
         protocol_counts["TCP"] += 1
     elif UDP in packet:
         transport = packet[UDP]
-        protocol = f"UDP:{transport.sport}->{transport.dport}"
+        protocol = "UDP"
+        source_port = transport.sport
+        destination_port = transport.dport
         protocol_counts["UDP"] += 1
     elif IP in packet:
         protocol_counts["IPv4"] += 1
@@ -67,23 +67,57 @@ def handle_packet(packet):
     elif ARP in packet:
         protocol_counts["ARP"] += 1
 
-    #get the IP layer if this packet has IPv4
-    ip = None
+    #get the IP layer if this packet has IPv4 or IPv6
+    source_ip = None
+    destination_ip = None
     if IP in packet:
-        ip = packet[IP]
+        source_ip = packet[IP].src
+        destination_ip = packet[IP].dst
+    elif IPv6 in packet:
+        source_ip = packet[IPv6].src
+        destination_ip = packet[IPv6].dst
 
-    #get basic ethernet packet information
-    ethernet = packet[Ether]
-    source_mac = packet[Ether].src
-    packet_size = len(packet)
+    database.insert_packet(
+        {
+            "captured_at": datetime.now(timezone.utc),
+            "source_mac": ethernet.src,
+            "destination_mac": ethernet.dst,
+            "source_ip": source_ip,
+            "destination_ip": destination_ip,
+            "protocol": protocol,
+            "source_port": source_port,
+            "destination_port": destination_port,
+            "packet_size": packet_size,
+            "ether_type": ether_type,
+        }
+    )
 
     #add this packet and its size to the source device's totals
-    packets_by_source[source_mac] += 1
-    bytes_by_source[source_mac] += packet_size
+    packets_by_source[ethernet.src] += 1
+    bytes_by_source[ethernet.src] += packet_size
 
     #count how many times each ethernet type appears
-    ether_type = packet[Ether].type
     ether_type_counts[ether_type] += 1
+
+    #checking if packet has a DNS layer
+    if DNS in packet:
+        dns = packet[DNS]
+        if dns.qr == 0 and DNSQR in packet: #qr indicates msg type. 0-query, 1-response
+            query = packet[DNSQR]
+            domain = query.qname.decode(errors="replace").rstrip(".") #decoding bytes into text
+            dns_query_counts[domain] += 1
+            database.insert_dns_query(
+                {
+                    "captured_at": datetime.now(timezone.utc),
+                    "domain": domain,
+                    "query_type": query.qtype,
+                    "source_ip": source_ip,
+                    "destination_ip": destination_ip,
+                }
+            )
+            print(f"DNS query: {domain} type {query.qtype}")
+        elif dns.qr == 1:
+            print(f"DNS response: answers={dns.ancount}")
 
     #start building the one-line output for this packet
     packet_info = (
@@ -91,12 +125,15 @@ def handle_packet(packet):
         f"{ethernet.src} -> {ethernet.dst}"
     )
 
-    #add IP addresses when the packet has an IPv4 layer
-    if ip is not None:
-        packet_info += f" | {ip.src} -> {ip.dst}"
+    #add IP addresses when the packet has an IP layer
+    if source_ip is not None:
+        packet_info += f" | {source_ip} -> {destination_ip}"
 
     #print the packet details while the sniffer is running
-    print(f"{packet_info} | {protocol} | {packet_size} B")
+    display_protocol = protocol
+    if source_port is not None and destination_port is not None:
+        display_protocol = f"{protocol}:{source_port}->{destination_port}"
+    print(f"{packet_info} | {display_protocol} | {packet_size} B")
 
 
 #convert a numeric EtherType into a readable name
@@ -179,8 +216,9 @@ def print_summary():
 
 try:
     print("Started. Press Ctrl+C.")
+    database.initialize_database()
     #capture for 10 seconds and process each packet with handle_packet
-    sniff(timeout=10, prn=handle_packet, store=False) #store false, means that we dont keep all packets in memo
+    sniff( prn=handle_packet, store=False) #store false, means that we dont keep all packets in memo
 
 finally:
     #print the summary even when the user stops the program with Ctrl+C

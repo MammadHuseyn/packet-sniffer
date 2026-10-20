@@ -4,3 +4,6 @@ __pycache__/
 *.pcap
 *.pcapng
 .env
+traffic.db
+traffic.db-shm
+traffic.db-wal
