@@ -326,6 +326,21 @@ def get_top_dns_domains(
     )
 
 
+def get_dns_domains(
+    database_path: str | Path = DEFAULT_DATABASE_PATH,
+) -> list[dict[str, Any]]:
+    """Return every queried DNS domain ordered by query count."""
+    return _rows(
+        """
+        SELECT domain, COUNT(*) AS query_count
+        FROM dns_queries
+        GROUP BY domain
+        ORDER BY query_count DESC, domain
+        """,
+        database_path=database_path,
+    )
+
+
 def get_traffic_over_time(
     interval: str = "minute",
     database_path: str | Path = DEFAULT_DATABASE_PATH,

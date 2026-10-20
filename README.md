@@ -26,8 +26,8 @@ handle_packet(packet)
 
 The program captures packets for 10 seconds. Pressing `Ctrl+C` stops the
 capture early. Each packet is passed to `handle_packet()`, which checks its
-protocol layers, prints a short description, and updates the statistics used
-in the final summary.
+protocol layers, prints a short description, updates the statistics used in
+the final summary, and stores structured packet data in `traffic.db`.
 
 An Ethernet frame has an Ethernet header followed by its payload:
 
@@ -48,6 +48,7 @@ link-layer Ethernet header; they are not part of the IP header.
 - Python 3
 - [Npcap](https://npcap.com/#download)
 - Scapy
+- Streamlit
 - Administrator privileges when opening the capture interface on Windows
 
 ## Installation
@@ -62,20 +63,20 @@ Download and run the official Npcap installer. During installation, enable:
 
 Restart Windows if the installer requests it.
 
-### 2. Install Scapy
+### 2. Install Python dependencies
 
 This repository already contains a `venv` directory. If you want to use it,
 activate it first:
 
 ```powershell
 .\venv\Scripts\Activate.ps1
-python -m pip install scapy
+python -m pip install -r .\requirements.txt
 ```
 
 If you are not using the repository virtual environment, install Scapy with:
 
 ```powershell
-python -m pip install scapy
+python -m pip install scapy streamlit
 ```
 
 ## Running the sniffer
@@ -120,6 +121,37 @@ The final summary includes:
 - Protocol counts
 - The most frequently queried DNS domains
 
+## Running the dashboard
+
+The Streamlit dashboard reads structured packet data and DNS queries from
+`traffic.db`. Start the sniffer first, then open a second PowerShell window and
+run:
+
+```powershell
+.\venv\Scripts\Activate.ps1
+streamlit run .\dashboard.py
+```
+
+Open the displayed local URL, usually
+`http://localhost:8501`, in a browser.
+
+The dashboard refreshes automatically and displays:
+
+- Total packets and total traffic volume
+- Estimated packets per second
+- Traffic over time
+- Protocol counts
+- Top source MAC addresses
+- Recent packets
+- **All** DNS domains recorded by the sniffer, ordered by query count
+- Recorded alerts
+
+The SQLite database also stores:
+
+- Captured packet timestamps, addresses, protocols, ports, sizes, and Ethernet types
+- DNS query domains and query types
+- Alerts created by future detection rules
+
 ## Checking available interfaces
 
 To check whether Scapy can see the network interfaces exposed by Npcap:
@@ -144,6 +176,9 @@ the link layer where those addresses are present.
 ## Project files
 
 - `sniffer_scapy.py` - captures packets and prints traffic statistics
+- `database.py` - creates the SQLite schema and stores/query packet data
+- `dashboard.py` - displays live traffic data with Streamlit
+- `requirements.txt` - Python dependencies
 - `helpers/EN-ethernet-frame-structure3.jpg` - Ethernet frame structure image
 - `README.md` - setup and usage instructions
 
@@ -151,6 +186,7 @@ the link layer where those addresses are present.
 
 - Only capture traffic on networks and devices that you own or are authorized
   to monitor.
-- The sniffer does not save packets to a capture file because it uses
-  `store=False`.
+- The sniffer does not save raw packets to a capture file. It uses
+  `store=False`, but stores structured packet metadata in `traffic.db` for the
+  Streamlit dashboard.
 - The current capture duration is 10 seconds.

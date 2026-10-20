@@ -65,7 +65,7 @@ def _render_dashboard(database_path: Path, packet_limit: int) -> None:
         traffic = database.get_traffic_over_time("minute", database_path)
         protocols = database.get_protocol_counts(database_path)
         source_macs = database.get_top_source_macs(10, database_path)
-        dns_domains = database.get_top_dns_domains(10, database_path)
+        dns_domains = database.get_dns_domains(database_path)
         packets = database.get_recent_packets(
             packet_limit,
             database_path,
@@ -148,7 +148,7 @@ def _render_dashboard(database_path: Path, packet_limit: int) -> None:
     lower_columns = st.columns(2)
 
     with lower_columns[0]:
-        st.subheader("Top DNS domains")
+        st.subheader("All DNS domains")
         if dns_domains:
             st.dataframe(
                 dns_domains,
