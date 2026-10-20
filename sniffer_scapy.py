@@ -10,6 +10,9 @@ from scapy.all import sniff, Ether, IP, TCP, UDP, ARP, IPv6, DNS, DNSQR, DNSRR, 
 
 from collections import Counter, defaultdict
 #to store stats, defaultdict auto starts missing values at 0
+import database
+
+
 
 
 bytes_by_source = defaultdict(int)

@@ -152,6 +152,7 @@ def insert_packet(
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
+            #placeholder for sql injections
             _packet_values(packet),
         )
         conn.commit()
