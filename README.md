@@ -112,6 +112,7 @@ The live output includes:
 - TCP or UDP source and destination ports
 - Packet size
 - DNS queries and DNS response answer counts
+- Plaintext HTTP request methods, hosts, paths, and user-agents from TCP port 80
 
 The final summary includes:
 
@@ -120,6 +121,13 @@ The final summary includes:
 - Ethernet types such as IPv4, IPv6, ARP, and VLAN
 - Protocol counts
 - The most frequently queried DNS domains
+- Recent plaintext HTTP requests
+
+HTTP parsing is limited to HTTP/1.x request headers carried over TCP port 80.
+HTTPS traffic on port 443 is encrypted and does not expose request paths,
+headers, or user-agents to this parser. TCP request headers may span multiple
+packets; the sniffer buffers up to 64 KiB per connection while looking for the
+HTTP header terminator.
 
 ## Running the dashboard
 

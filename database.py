@@ -83,6 +83,19 @@ def initialize_database(database_path: str | Path = DEFAULT_DATABASE_PATH) -> No
                 destination_ip TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS http_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                captured_at TEXT NOT NULL,
+                source_ip TEXT,
+                source_port INTEGER,
+                destination_ip TEXT,
+                destination_port INTEGER,
+                method TEXT NOT NULL,
+                host TEXT,
+                path TEXT NOT NULL,
+                user_agent TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS alerts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at TEXT NOT NULL,
@@ -102,6 +115,8 @@ def initialize_database(database_path: str | Path = DEFAULT_DATABASE_PATH) -> No
                 ON packets(source_mac);
             CREATE INDEX IF NOT EXISTS idx_dns_queries_domain
                 ON dns_queries(domain);
+            CREATE INDEX IF NOT EXISTS idx_http_requests_captured_at
+                ON http_requests(captured_at);
             CREATE INDEX IF NOT EXISTS idx_alerts_created_at
                 ON alerts(created_at);
             """
@@ -206,6 +221,43 @@ def insert_dns_query(
                 query.get("query_type"),
                 query.get("source_ip"),
                 query.get("destination_ip"),
+            ),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+
+
+def insert_http_request(
+    request: Mapping[str, Any],
+    database_path: str | Path = DEFAULT_DATABASE_PATH,
+) -> int:
+    """Insert a parsed plaintext HTTP request and return its database id."""
+    required = ("method", "path")
+    missing = [field for field in required if not request.get(field)]
+    if missing:
+        raise ValueError(
+            f"An HTTP request is missing required fields: {', '.join(missing)}"
+        )
+
+    with connection(database_path) as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO http_requests (
+                captured_at, source_ip, source_port, destination_ip,
+                destination_port, method, host, path, user_agent
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _timestamp(request.get("captured_at")),
+                request.get("source_ip"),
+                request.get("source_port"),
+                request.get("destination_ip"),
+                request.get("destination_port"),
+                request["method"],
+                request.get("host"),
+                request["path"],
+                request.get("user_agent"),
             ),
         )
         conn.commit()
@@ -338,6 +390,26 @@ def get_dns_domains(
         ORDER BY query_count DESC, domain
         """,
         database_path=database_path,
+    )
+
+
+def get_recent_http_requests(
+    limit: int = 50,
+    database_path: str | Path = DEFAULT_DATABASE_PATH,
+) -> list[dict[str, Any]]:
+    """Return the newest parsed plaintext HTTP requests first."""
+    if limit < 1:
+        raise ValueError("limit must be greater than zero")
+    return _rows(
+        """
+        SELECT captured_at, source_ip, source_port, destination_ip,
+               destination_port, method, host, path, user_agent
+        FROM http_requests
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (limit,),
+        database_path,
     )
 
 

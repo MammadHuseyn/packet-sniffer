@@ -1,7 +1,9 @@
 #u gotta install Npcap aswell, to link-layer capture
 
 from datetime import datetime, timezone
-from scapy.all import sniff, Ether, IP, TCP, UDP, ARP, IPv6, DNS, DNSQR
+from urllib.parse import urlsplit
+
+from scapy.all import sniff, Ether, IP, TCP, UDP, ARP, IPv6, DNS, DNSQR, Raw
 import database
 #raw is for the payload, to see it raw, but generally not needed
 #sniff captures packets from a network interface
@@ -23,6 +25,9 @@ packets_by_source = defaultdict(int)
 ether_type_counts = Counter() #ethernet frame types (IPv4, ARP etc.)
 protocol_counts = Counter() #protocols (TCP, UDP, IPv6, ARP)
 dns_query_counts = Counter() #dns_query counts
+http_flow_buffers = defaultdict(bytearray)
+MAX_HTTP_BUFFER_SIZE = 64 * 1024
+HTTP_METHODS = {"GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"}
 
 
 #it was used to convert binary data into text preview,
@@ -121,6 +126,44 @@ def handle_packet(packet):
         ):
             print(f"DNS response: answers={dns.ancount}")
 
+    if (
+        TCP in packet
+        and Raw in packet
+        and packet[TCP].dport == 80
+        and source_ip is not None
+        and destination_ip is not None
+    ):
+        flow_key = (source_ip, packet[TCP].sport, destination_ip, packet[TCP].dport)
+        http_flow_buffers[flow_key].extend(bytes(packet[Raw].load))
+        if len(http_flow_buffers[flow_key]) > MAX_HTTP_BUFFER_SIZE:
+            del http_flow_buffers[flow_key][:-MAX_HTTP_BUFFER_SIZE]
+
+        while b"\r\n\r\n" in http_flow_buffers[flow_key]:
+            request_bytes, _, remainder = http_flow_buffers[flow_key].partition(
+                b"\r\n\r\n"
+            )
+            http_flow_buffers[flow_key] = bytearray(remainder)
+            request = parse_http_request(request_bytes)
+            if request is None:
+                continue
+            request.update(
+                {
+                    "captured_at": datetime.now(timezone.utc),
+                    "source_ip": source_ip,
+                    "source_port": packet[TCP].sport,
+                    "destination_ip": destination_ip,
+                    "destination_port": packet[TCP].dport,
+                }
+            )
+            database.insert_http_request(request)
+            host = request["host"] or destination_ip
+            print(
+                f"HTTP request: {request['method']} "
+                f"http://{host}{request['path']}"
+            )
+            if request["user_agent"]:
+                print(f"User-Agent: {request['user_agent']}")
+
     #start building the one-line output for this packet
     packet_info = (
         f"{datetime.now():%H:%M:%S} "
@@ -172,6 +215,42 @@ def dns_queries(packet):
         if domain:
             queries.append((domain, query.qtype))
     return queries
+
+
+def parse_http_request(payload):
+    """Parse an HTTP/1.x request header block, or return None if not HTTP."""
+    try:
+        text = payload.decode("iso-8859-1")
+    except UnicodeDecodeError:
+        return None
+
+    lines = text.split("\r\n")
+    if not lines or len(lines[0].split(" ")) != 3:
+        return None
+
+    method, target, version = lines[0].split(" ", 2)
+    if method not in HTTP_METHODS or not version.startswith("HTTP/1."):
+        return None
+
+    headers = {}
+    for line in lines[1:]:
+        if not line:
+            break
+        name, separator, value = line.partition(":")
+        if separator:
+            headers[name.strip().lower()] = value.strip()
+
+    parsed_target = urlsplit(target)
+    path = parsed_target.path or "/"
+    if parsed_target.query:
+        path += f"?{parsed_target.query}"
+
+    return {
+        "method": method,
+        "host": headers.get("host"),
+        "path": path,
+        "user_agent": headers.get("user-agent"),
+    }
 
 
 #convert bytes into B, KB, MB, or GB

@@ -66,6 +66,7 @@ def _render_dashboard(database_path: Path, packet_limit: int) -> None:
         protocols = database.get_protocol_counts(database_path)
         source_macs = database.get_top_source_macs(10, database_path)
         dns_domains = database.get_dns_domains(database_path)
+        http_requests = database.get_recent_http_requests(50, database_path)
         packets = database.get_recent_packets(
             packet_limit,
             database_path,
@@ -181,6 +182,27 @@ def _render_dashboard(database_path: Path, packet_limit: int) -> None:
             )
         else:
             st.success("No alerts have been recorded.")
+
+    st.subheader("Recent plaintext HTTP requests")
+    if http_requests:
+        st.dataframe(
+            http_requests,
+            column_config={
+                "captured_at": "Time",
+                "source_ip": "Source IP",
+                "source_port": "Source port",
+                "destination_ip": "Destination IP",
+                "destination_port": "Destination port",
+                "method": "Method",
+                "host": "Host",
+                "path": "Requested path",
+                "user_agent": "User-Agent",
+            },
+            hide_index=True,
+            use_container_width=True,
+        )
+    else:
+        st.info("No plaintext HTTP requests have been captured.")
 
 
 def main() -> None:
