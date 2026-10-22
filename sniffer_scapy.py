@@ -1,7 +1,7 @@
 #u gotta install Npcap aswell, to link-layer capture
 
 from datetime import datetime, timezone
-from scapy.all import sniff, Ether, IP, TCP, UDP, ARP, IPv6, DNS, DNSQR, DNSRR, Raw
+from scapy.all import sniff, Ether, IP, TCP, UDP, ARP, IPv6, DNS, DNSQR
 import database
 #raw is for the payload, to see it raw, but generally not needed
 #sniff captures packets from a network interface
@@ -99,24 +99,26 @@ def handle_packet(packet):
     #count how many times each ethernet type appears
     ether_type_counts[ether_type] += 1
 
-    #checking if packet has a DNS layer
-    if DNS in packet:
+    for domain, query_type in dns_queries(packet):
+        dns_query_counts[domain] += 1
+        database.insert_dns_query(
+            {
+                "captured_at": datetime.now(timezone.utc),
+                "domain": domain,
+                "query_type": query_type,
+                "source_ip": source_ip,
+                "destination_ip": destination_ip,
+            }
+        )
+        print(f"DNS query: {domain} type {query_type}")
+
+    if UDP in packet and DNS in packet:
+        transport = packet[UDP]
         dns = packet[DNS]
-        if dns.qr == 0 and DNSQR in packet: #qr indicates msg type. 0-query, 1-response
-            query = packet[DNSQR]
-            domain = query.qname.decode(errors="replace").rstrip(".") #decoding bytes into text
-            dns_query_counts[domain] += 1
-            database.insert_dns_query(
-                {
-                    "captured_at": datetime.now(timezone.utc),
-                    "domain": domain,
-                    "query_type": query.qtype,
-                    "source_ip": source_ip,
-                    "destination_ip": destination_ip,
-                }
-            )
-            print(f"DNS query: {domain} type {query.qtype}")
-        elif dns.qr == 1:
+        if (
+            (transport.sport == 53 or transport.dport == 53)
+            and dns.qr == 1
+        ):
             print(f"DNS response: answers={dns.ancount}")
 
     #start building the one-line output for this packet
@@ -146,6 +148,30 @@ def ether_type_name(ether_type):
     }
 
     return names.get(ether_type, "Unknown")
+
+
+def dns_queries(packet):
+    """Return domain names from UDP DNS query packets on port 53."""
+    if UDP not in packet or DNS not in packet:
+        return []
+
+    transport = packet[UDP]
+    if transport.sport != 53 and transport.dport != 53:
+        return []
+
+    dns = packet[DNS]
+    if dns.qr != 0 or DNSQR not in packet:
+        return []
+
+    queries = []
+    questions = dns.qd if isinstance(dns.qd, list) else [dns.qd]
+    for query in questions:
+        if not isinstance(query, DNSQR):
+            continue
+        domain = query.qname.decode("utf-8", errors="replace").rstrip(".")
+        if domain:
+            queries.append((domain, query.qtype))
+    return queries
 
 
 #convert bytes into B, KB, MB, or GB
@@ -214,16 +240,17 @@ def print_summary():
         print(f"{domain:<40} {count:>10}")
 
 
-try:
+def main():
     print("Started. Press Ctrl+C.")
     database.initialize_database()
-    #capture for 10 seconds and process each packet with handle_packet
-    sniff( prn=handle_packet, store=False) #store false, means that we dont keep all packets in memo
+    try:
+        sniff(prn=handle_packet, store=False)
+    finally:
+        print_summary()
 
-finally:
-    #print the summary even when the user stops the program with Ctrl+C
-    #print("ended")
-    print_summary()
+
+if __name__ == "__main__":
+    main()
 
 #Npcap captures the packets at the data-link llayer, 
 # and scapy converts them into packet object
